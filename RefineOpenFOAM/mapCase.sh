@@ -2,6 +2,7 @@
 # $1 is the source case, full of time directories
 # $2 is the target case, empty, no time directories
 # $3 is the list of time directories to be mapped, MUST BE IN ORDER OF EARLIEST TO LATEST
+# $4 is the list fields to be mapped
 
 
 echo "Mapping fields from $1 to $2"
@@ -28,7 +29,10 @@ source_tmp="${1}_tmp"
 echo "Temporary source case: $source_tmp"
 mkdir $source_tmp
 
-rsync -azvhm --exclude="0_org/" --include="*/" --include="T" --include="alpha.material" --exclude="*"  "${1}/" $source_tmp
+while read f; do
+  echo "Copying field ${f} to temporary dir"
+  rsync -azvhm --exclude="0_org/" --include="*/" --include="${f}" --exclude="*"  "${1}/" $source_tmp
+  done <../$4
 
 # Copying system 
 cp -r "${1}/system" "${source_tmp}/"
