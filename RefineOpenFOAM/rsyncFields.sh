@@ -11,10 +11,13 @@ echo "Temporary source case: $source_tmp"
 mkdir ${source_tmp}
 
 # Copying system 
-cp -r "${1}/system" "${source_tmp}/"
+# cp -r "${1}/system" "${source_tmp}/"
+rsync -azvhm ${1}/system $source_tmp/
+
 
 # Copying constant, for mesh
-cp -r "${1}/constant" "${source_tmp}/"
+# cp -r "${1}/constant" "${source_tmp}/"
+rsync -azvhm ${1}/constant $source_tmp/
 
 echo "system and constant copied"
 
