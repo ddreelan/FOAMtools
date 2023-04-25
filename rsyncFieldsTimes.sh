@@ -1,5 +1,4 @@
 #!/bin/bash
-echo "Declaring bash functions"
 rsyncFieldsTimes () {
   echo "arg1 is the source case, full of time directories"
   echo "arg2 is the target case name"
@@ -22,6 +21,3 @@ rsyncFieldsTimes () {
 
   echo "Rsyncing complete"
 }
-
-echo "Loading of rsync function complete"
-
