@@ -14,10 +14,10 @@ rsyncFieldsTimes () {
 
   while read t; do
     echo  "Rsyncing time ${t}" 
-    while read f; do
-    echo "Copying field ${f} for time ${t}"
-    rsync -azvhm --include="${t}/" --include="processor*/" --include="${f}" --exclude="*"  "${1}/" $2/
-    done <$4
+#    while read f; do
+ #   echo "Copying field ${f} for time ${t}"
+    rsync -azvhm --include="${t}/" --include="processor*/" --include-from=$4 --exclude="*"  "${1}/" $2/
+#    done <$4
   done <$3
 
   echo "Rsyncing complete"
