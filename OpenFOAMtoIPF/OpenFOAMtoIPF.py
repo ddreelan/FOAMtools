@@ -1,6 +1,6 @@
 print("Welcome to OpenFOAMtoIPF.py, created by Danny Dreelan")
 print("If packages are not installed, please run this first:\n")
-print("\tpython3.9 -m pip install --upgrade pip matplotlib orix\n\n\n")
+print("\tpython3.9 -m pip install --upgrade pip matplotlib orix numpy math re time string os\n\n\n")
 
 print("Loading packages...")
 import time
