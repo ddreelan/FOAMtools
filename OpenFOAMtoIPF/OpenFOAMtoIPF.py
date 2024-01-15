@@ -263,7 +263,7 @@ def IPFq(CasePath,Time,symmetryIn=symmetryGroup):
         
     writeToOpenFOAMfield("vector",CasePath,Time,"IPFx",rgbX,boundaryStr)
     writeToOpenFOAMfield("vector",CasePath,Time,"IPFy",rgbY,boundaryStr)
-    writeToOpenFOAMfield("vector",CasePath,Time,"IPFz",rgbY,boundaryStr)
+    writeToOpenFOAMfield("vector",CasePath,Time,"IPFz",rgbZ,boundaryStr)
     
 def saveIPFkey(CasePath,symmetryIn=symmetryGroup):
     # Get IPF color key as RGB array
