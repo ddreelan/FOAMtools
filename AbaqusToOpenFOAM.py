@@ -9,6 +9,11 @@ import sys
 from decimal import Decimal
 
 
+# def readOpenFOAMfield(ValueType,filePath):
+# def writeOpenFOAMfield(ValueType,CasePath,TimeStr,FieldName,FieldValues,boundaryStr):
+from OpenFOAM_IO import readOpenFOAMfield, writeOpenFOAMfield
+
+
 abaqusCSVpath = sys.argv[1]
 # ofCasePath = "/Users/dd/openfoam/CellularAutomataFoam/run/CFD-Coupling/AbaqusToOpenFOAM_deeper/"
 ofTime = "0"
@@ -16,126 +21,165 @@ ofCellPosName = "CellPos"
 outputFieldName = "T"
 ofCasePath = os.getcwd()
 
+def readAbaqusDF(abaqusCSVpath):
+    print("Reading",abaqusCSVpath,"as a DataFrame")
+    tick = time.time()
+    df = pd.read_csv(abaqusCSVpath)
+    timeTaken = time.time() - tick
+    print("\tDone in " + str(round(timeTaken,3)), "seconds")
 
-def ReadVectorFieldValues(CasePath,TimeStr,FieldName):
-    filePath = CasePath + TimeStr + "/" + FieldName
-#     Open file and read and split the lines
-    with open(filePath) as f:
-        lines = f.read().splitlines() 
-    i = 0
-    for line in lines:
-        if lines[i] == "(":
-            nValues = int(lines[i-1]);
-            iStart = i+1;
-            
-        if lines[i] == "boundaryField":
-            iEnd = i-4;
-        i = i+1
+    FrameStringArr = df["Frame"].unique()
+    TimeArr = [float(f.partition("=")[-1].strip()) for f in FrameStringArr]
+    print("Number of time frames:", len(TimeArr))
+    print("Times:",TimeArr)
 
-    lines = lines[iStart:iEnd+1]
-
-    i =0
-    for l in lines:
-        lines[i] = lines[i].strip('(')
-        lines[i] = lines[i].strip(')')
-        lines[i] = lines[i].split()
-
-        j=0
-        for c in lines[i]:
-            lines[i][j] = float(c)
-            j=j+1
-        
-        i = i+1
-        
-    lines = np.array(lines)
+    dfDict = {elem : pd.DataFrame()  for elem in TimeArr}
     
-    return lines
+#     Populate dict of dataframes
+    for key in dfDict.keys():
+        dfDict[key] = df[:][df.Frame == key]
 
-def getBoundaryStr(CasePath,TimeStr,FieldName):
-    filePath = CasePath + TimeStr + "/" + FieldName
-    with open(filePath) as f:
-        lines = f.read().splitlines() 
-    i = 0
-    for line in lines:
-        if lines[i] == "boundaryField":
-            iBoundary = i
-        i = i+1
+    return dfDict
 
-    boundaryLines = lines[iBoundary:-1]
-    boundaryStr = ""
+dfDict = readAbaqusDF(abaqusCSVpath)
 
-    b = 0
-    for B in boundaryLines:
-        boundaryLines[b] = re.sub("calculated","zeroGradient",B)
-        if "value" in B:
-            boundaryLines[b]=""
-        boundaryStr = boundaryStr + str(boundaryLines[b]) + str("\n")
-        b = b+1
+# print(dfDict)
+
+def getDomainSize(dfDict):
+    print("\nGetting range of X, Y, Z for dfDict")
+    minX, maxX = 1e12, -1e12
+
+    print(dfDict.keys())
+    for key in dfDict.keys():
+        # print(dfDict[key])
+        # print(dfDict[:]["X"])
+        x =  np.array(dfDict[key]["X"])
+        print(x)
+        # minX = min(min(x),minX)
+        # y =  np.array(df["Y"])
+        # z =  np.array(df["Z"])
+    # print("minX:",minX)
+# getDomainSize(dfDict)
+
+
+def getDomainSize(abaqusCSVpath, Tl=1500, cellSizeTol=1e-5):
+    # print("test")
+    print("Reading " ,abaqusCSVpath)#, end=" ...")
+    # df = pd.read_excel(abaqusCSVpath)
+    df = pd.read_csv(abaqusCSVpath)
+    print("DONE")
+    FrameStringArr = df["Frame"].unique()
     
-    boundaryStr = str(boundaryStr)
-    return boundaryStr
+    # create dataframe dict for each
+    dfDict = {elem : pd.DataFrame()  for elem in FrameStringArr}
+#     Create list of times
+    TimeArr = [float(f.partition("=")[-1].strip()) for f in FrameStringArr]
+    
+#     Populate dict of dataframes
+    for key in dfDict.keys():
+        dfDict[key] = df[:][df.Frame == key]
 
-def  writeField(ValueType,CasePath,TimeStr,FieldName,FieldValues,boundaryInfoStr):
-    buffer=[]
-    buffer.append('/*--------------------------------*- C++ -*----------------------------------*\\')
-    buffer.append('|=========                 |                                                 |')
-    buffer.append('| \\      /  F ield         | foam-extend: Open Source CFD                    |')
-    buffer.append('|  \\    /   O peration     | Version:     4.0                                |')
-    buffer.append('|   \\  /    A nd           | Web:         http://www.foam-extend.org         |')
-    buffer.append('|    \\/     M anipulation  |                                                 |')
-    buffer.append('\*---------------------------------------------------------------------------*/')
-    buffer.append('//             THIS FILE WAS CREATED BY D. DREELAN IN MATLAB')
-    buffer.append('FoamFile')
-    buffer.append('{')
-    buffer.append('    version     2.0;')
-    buffer.append('    format      ascii;')
-#     iStart = len(buffer)
-#     i = iStart + 1;
+    
+    xMinG, yMinG, zMinG = 1e12, 1e12, 1e12
+    xMaxG, yMaxG, zMaxG = -1e12, -1e12, -1e12
+#   record max and min of melt pool size over all timesteps
+    xMeltMinG, yMeltMinG, zMeltMinG = 1e12, 1e12, 1e12
+    xMeltMaxG, yMeltMaxG, zMeltMaxG = -1e12, -1e12, -1e12
+    meltPoolSizes = []
+    layerHeights = []
 
-    if ValueType == 'vector':
-        buffer.append('    class       volVectorField;')
-    elif ValueType == 'scalar':
-        buffer.append('    class       volScalarField;')
-#     else: # Need to quit out and say not recognised
+    for i in range(len(dfDict)):
+        timeStr = '%g'%(TimeArr[i])        
+        x =  np.array(dfDict[FrameStringArr[i]]["X"])
+        y =  np.array(dfDict[FrameStringArr[i]]["Y"])
+        z =  np.array(dfDict[FrameStringArr[i]]["Z"])
+        T =  np.array(dfDict[FrameStringArr[i]]["          NT11"])
 
-    buffer.append('    location   "' + TimeStr + '";')
-    buffer.append('    object    ' + FieldName + ';')
-    buffer.append('}')
-    if FieldName == "T":
-        buffer.append('dimensions      [0 0 0 1 0 0 0];')
-    else:
-        buffer.append('dimensions      [0 0 0 0 0 0 0];')
-    buffer.append('internalField   nonuniform List<'+str(ValueType)+'>')
-    buffer.append(str(len(FieldValues)))
-    buffer.append('(')
+        xu =  sorted(dfDict[FrameStringArr[i]]["X"].unique())
+        yu =  sorted(dfDict[FrameStringArr[i]]["Y"].unique())
+        zu =  sorted(dfDict[FrameStringArr[i]]["Z"].unique())
+        
+#         Get the melt pool dimensions for this timestep
+        xMeltMin, yMeltMin, zMeltMin = 1e12, 1e12, 1e12
+        xMeltMax, yMeltMax, zMeltMax = -1e12, -1e12, -1e12
 
-# %      ADD ALL FIELD VALUES
-    if ValueType == 'scalar':
-        for v in range(0,len(FieldValues)):
-            buffer.append(str(FieldValues[v]))
+        #         Get the melt pool dimensions for this timestep
+        xMin, yMin, zMin = 1e12, 1e12, 1e12
+        xMax, yMax, zMax = -1e12, -1e12, -1e12
 
-    elif ValueType == 'vector':
-        for v in range(0,len(FieldValues)):
-            buffer.append("(" +str(FieldValues[v,0])+" " +str(FieldValues[v,1])+" " +str(FieldValues[v,2])+")")
-            
-    buffer.append(")")
-    buffer.append(";")    
-    buffer.append(boundaryInfoStr)
+        for k in range(len(T)):
+            xMin = min(xMin,x[k])
+            yMin = min(yMin,y[k])
+            zMin = min(zMin,z[k])
+            xMax = max(xMax,x[k])
+            yMax = max(yMax,y[k])
+            zMax = max(zMax,z[k])
 
-    pathToFile = CasePath + TimeStr + "/" + FieldName
-    os.makedirs(os.path.dirname(pathToFile), exist_ok=True)
-    f = open(pathToFile, 'w+')
-    f.truncate()
-    for line in buffer:
-        f.write(line + "\n")
-    f.close()
+            if T[k] > Tl:
+                xMeltMin = min(xMeltMin,x[k])
+                yMeltMin = min(yMeltMin,y[k])
+                zMeltMin = min(zMeltMin,z[k])
+                xMeltMax = max(xMeltMax,x[k])
+                yMeltMax = max(yMeltMax,y[k])
+                zMeltMax = max(zMeltMax,z[k])
+#         print("Melt pool size for time ", timeStr)
+#         print("x:",xMeltMin,xMeltMax)
+#         print("y:",yMeltMin,yMeltMax)
+#         print("z:",xMeltMin,zMeltMax,"\n")
+        layerHeights.append(zMeltMax)
+        xMeltMinG = min(xMeltMin,xMeltMinG)
+        yMeltMinG = min(yMeltMin,yMeltMinG)
+        zMeltMinG = min(zMeltMin,zMeltMinG)
+        xMeltMaxG = max(xMeltMax,xMeltMaxG)
+        yMeltMaxG = max(yMeltMax,yMeltMaxG)
+        zMeltMaxG = max(zMeltMax,zMeltMaxG)
 
+
+        xMinG = min(xMin,xMinG)
+        yMinG = min(yMin,yMinG)
+        zMinG = min(zMin,zMinG)
+        xMaxG = max(xMax,xMaxG)
+        yMaxG = max(yMax,yMaxG)
+        zMaxG = max(zMax,zMaxG)
+        meltPoolSizes.append([(xMeltMin,xMeltMax),(yMeltMin,yMeltMax),(zMeltMin,zMeltMax)])
+ 
+    print("DOMAIN BOUNDS FOR ALL TIMESTEPS")
+    print("x:\t",xMinG,"\t",xMaxG)
+    print("y:\t",yMinG,"\t",yMaxG)
+    print("z:\t",xMinG,"\t",zMaxG,"\n")          
+        
+    print("MELT POOL BOUNDS FOR ALL TIMESTEPS")
+    print("x:\t",xMeltMinG,"\t",xMeltMaxG)
+    print("y:\t",yMeltMinG,"\t",yMeltMaxG)
+    print("z:\t",xMeltMinG,"\t",zMeltMaxG,"\n")
+
+    # Getting cell sizes
+    xCellSize = []
+    yCellSize = []
+    zCellSize = []
+
+    for i in range(len(xu)-1):
+        xCellSize.append(xu[i+1]-xu[i])
+
+    xCellSize = sorted(xCellSize)
+    print("xCellSize:", xCellSize)
+    xCellMin = max(xCellSize)
+    for xCell in xCellSize:
+        if xCell > cellSizeTol:
+            xCellMin = min(xCellMin,xCell)
+            pass
+    print("xCellSize min:",xCellMin,"max:",max(xCellSize))
+
+    
+
+getDomainSize(abaqusCSVpath)
 
 def splitAbaqusDF(abaqusCSVpath,ofTime,ofCellPosName,outputFieldName="T",T0=21,Tl=1660,writeVoF=True):
     ofCasePath = ""
     # print("test")
     print("Reading " ,abaqusCSVpath)#, end=" ...")
-    df = pd.read_excel(abaqusCSVpath)
+    # df = pd.read_excel(abaqusCSVpath)
+    df = pd.read_csv(abaqusCSVpath)
     print("DONE")
     FrameStringArr = df["Frame"].unique()
     
@@ -159,6 +203,9 @@ def splitAbaqusDF(abaqusCSVpath,ofTime,ofCellPosName,outputFieldName="T",T0=21,T
 #   record max and min of melt pool size over all timesteps
     xMeltMinG, yMeltMinG, zMeltMinG = 1e12, 1e12, 1e12
     xMeltMaxG, yMeltMaxG, zMeltMaxG = -1e12, -1e12, -1e12
+
+    xMinG, yMinG, zMinG = 1e12, 1e12, 1e12
+    xMaxG, yMaxG, zMaxG = -1e12, -1e12, -1e12
     meltPoolSizes = []
     layerHeights = []
 
@@ -170,10 +217,17 @@ def splitAbaqusDF(abaqusCSVpath,ofTime,ofCellPosName,outputFieldName="T",T0=21,T
         T =  np.array(dfDict[FrameStringArr[i]]["          NT11"])
         
 #         Get the melt pool dimensions for this timestep
-        xMeltMin, yMeltMin, zMeltMin = 1e12, 1e12, 1e12
-        xMeltMax, yMeltMax, zMeltMax = -1e12, -1e12, -1e12
+        xMin, yMin, zMin = 1e12, 1e12, 1e12
+        xMax, yMax, zMax = -1e12, -1e12, -1e12
 
         for k in range(len(T)):
+            xMin = min(xMin,x[k])
+            yMin = min(yMin,y[k])
+            zMin = min(zMin,z[k])
+            xMax = max(xMax,x[k])
+            yMax = max(yMax,y[k])
+            zMax = max(zMax,z[k])
+
             if T[k] > Tl:
                 xMeltMin = min(xMeltMin,x[k])
                 yMeltMin = min(yMeltMin,y[k])
@@ -192,8 +246,20 @@ def splitAbaqusDF(abaqusCSVpath,ofTime,ofCellPosName,outputFieldName="T",T0=21,T
         xMeltMaxG = max(xMeltMax,xMeltMaxG)
         yMeltMaxG = max(yMeltMax,yMeltMaxG)
         zMeltMaxG = max(zMeltMax,zMeltMaxG)
+
+        xMinG = min(xMin,xMinG)
+        yMinG = min(yMin,yMinG)
+        zMinG = min(zMin,zMinG)
+        xMaxG = max(xMax,xMaxG)
+        yMaxG = max(yMax,yMaxG)
+        zMaxG = max(zMax,zMaxG)
         meltPoolSizes.append([(xMeltMin,xMeltMax),(yMeltMin,yMeltMax),(zMeltMin,zMeltMax)])
-        
+
+
+    print("DOMAIN BOUNDS FOR ALL TIMESTEPS")
+    print("x:\t",xMinG,"\t",xMaxG)
+    print("y:\t",yMinG,"\t",yMaxG)
+    print("z:\t",xMinG,"\t",zMaxG,"\n")        
         
     print("MELT POOL BOUNDS FOR ALL TIMESTEPS")
     print("x:\t",xMeltMinG,"\t",xMeltMaxG)
@@ -264,4 +330,6 @@ def splitAbaqusDF(abaqusCSVpath,ofTime,ofCellPosName,outputFieldName="T",T0=21,T
         		writeField("scalar",ofCasePath,timeStr,"alpha.material",VoF,bdStr)
 			# print("alpha.material"," field written for time",timeStr)
 
-splitAbaqusDF(abaqusCSVpath,ofTime,ofCellPosName,outputFieldName="T",T0=21,Tl=1660,writeVoF=True)
+# def getAbaqusCSVdomainSize()
+
+# splitAbaqusDF(abaqusCSVpath,ofTime,ofCellPosName,outputFieldName="T",T0=21,Tl=1660,writeVoF=True)
